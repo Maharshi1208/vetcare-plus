@@ -1,13 +1,19 @@
 {
-  "name": "vetcare-backend",
-  "version": "0.1.0",
+  "name": "backend",
+  "version": "1.0.0",
   "private": true,
+  "type": "commonjs",
+  "main": "dist/index.js",
   "scripts": {
-    "dev": "ts-node-dev --respawn --transpile-only src/index.ts"
+    "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js"
   },
   "dependencies": {
     "cors": "^2.8.5",
-    "express": "^4.19.2"
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "pg": "^8.11.5"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",
