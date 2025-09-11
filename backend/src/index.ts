@@ -1,23 +1,35 @@
-import express from 'express';
-import cors from 'cors';
 import dotenv from 'dotenv';
-import { Pool } from 'pg';
-
 dotenv.config();
 
+import express from 'express';
+import cors from 'cors';
+import { Pool } from 'pg';
+
+// Feature routers
+import authRoutes from './auth/routes';
+import petRoutes from './pet/routes';
+import vetRoutes from './vet/routes';
+// import apptRoutes from './appt/routes'; // uncomment when appointments branch merges
+
+// -----------------------------
+// Create app FIRST
+// -----------------------------
 const app = express();
+
+// Middleware
 app.use(cors());
 app.use(express.json());
 
+// ENV
 const PORT = Number(process.env.PORT || 4000);
 const DATABASE_URL = process.env.DATABASE_URL as string;
 
-// Create a small, pooled Postgres client (for /health/db)
-const pool = new Pool({
-  connectionString: DATABASE_URL,
-});
+// PG pool (for health check)
+const pool = new Pool({ connectionString: DATABASE_URL });
 
-// Routes
+// -----------------------------
+// Health / root routes (public)
+// -----------------------------
 app.get('/', (_req, res) => {
   res.send('VetCare+ API is running');
 });
@@ -36,14 +48,30 @@ app.get('/ping', (_req, res) => {
 
 app.get('/health/db', async (_req, res) => {
   try {
-    const result = await pool.query('select 1 as ok');
-    res.json({ ok: true, db: result.rows[0] });
-  } catch (err: any) {
-    console.error('DB health error:', err); // helpful for debugging
-    res.status(500).json({ ok: false, error: err?.message || 'db error' });
+    const r = await pool.query('SELECT 1 as ok');
+    res.json({ ok: true, db: r.rows[0]?.ok === 1 });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'db error';
+    res.status(500).json({ ok: false, error: msg });
   }
 });
 
+// -----------------------------
+// Feature routes
+// -----------------------------
+app.use('/auth', authRoutes);
+app.use('/pets', petRoutes);
+app.use('/vets', vetRoutes);
+// app.use('/appointments', apptRoutes); // enable after appointments PR merges
+
+// -----------------------------
+// Start & graceful shutdown
+// -----------------------------
 app.listen(PORT, () => {
   console.log(`API listening on http://localhost:${PORT}`);
+});
+
+process.on('SIGINT', async () => {
+  try { await pool.end(); } catch {}
+  process.exit(0);
 });
