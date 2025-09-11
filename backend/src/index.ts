@@ -18,6 +18,18 @@ const pool = new Pool({
 });
 
 // Routes
+app.get('/', (_req, res) => {
+  res.send('VetCare+ API is running');
+});
+
+app.get('/health', (_req, res) => {
+  res.status(200).json({
+    ok: true,
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString(),
+  });
+});
+
 app.get('/ping', (_req, res) => {
   res.json({ ok: true, msg: 'VetCare+ API up' });
 });
@@ -27,6 +39,7 @@ app.get('/health/db', async (_req, res) => {
     const result = await pool.query('select 1 as ok');
     res.json({ ok: true, db: result.rows[0] });
   } catch (err: any) {
+    console.error('DB health error:', err); // helpful for debugging
     res.status(500).json({ ok: false, error: err?.message || 'db error' });
   }
 });
