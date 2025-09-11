@@ -7,12 +7,18 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+/**
+ * ---------- Enums ----------
+ */
 enum Role {
   OWNER
   VET
   ADMIN
 }
 
+/**
+ * ---------- Models ----------
+ */
 model User {
   id           String   @id @default(cuid())
   name         String?
@@ -21,4 +27,64 @@ model User {
   role         Role     @default(OWNER)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+
+  // Back-relation: one owner → many pets
+  pets Pet[]
+}
+
+model Pet {
+  id String @id @default(cuid())
+
+  // FK to User
+  ownerId String
+  owner   User   @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  name     String
+  species  String
+  breed    String?
+  dob      DateTime?
+  photoUrl String?
+  archived Boolean   @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([ownerId])
+  @@index([name])
+}
+
+/**
+ * ---------- Vet + Availability ----------
+ */
+model Vet {
+  id             String   @id @default(cuid())
+  name           String
+  specialization String?
+  email          String?  @unique
+  phone          String?
+  archived       Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  availabilities Availability[]
+}
+
+model Availability {
+  id String @id @default(cuid())
+
+  vetId String
+  vet   Vet    @relation(fields: [vetId], references: [id], onDelete: Cascade)
+
+  startAt  DateTime
+  endAt    DateTime
+  isBooked Boolean  @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  // NOTE: Prisma doesn't support @@check; endAt > startAt is enforced in API validation.
+  // You may also add a unique composite to prevent exact duplicate slots:
+  // @@unique([vetId, startAt, endAt])
+
+  @@index([vetId])
+  @@index([startAt])
 }
