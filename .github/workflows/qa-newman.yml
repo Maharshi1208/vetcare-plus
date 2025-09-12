@@ -1,0 +1,26 @@
+name: QA - Newman (manual)
+on:
+  workflow_dispatch:
+jobs:
+  newman:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install Newman deps
+        working-directory: qa/postman
+        run: |
+          npm ci || npm i
+      - name: Run Smoke (local env vars)
+        working-directory: qa/postman
+        run: >
+          npx newman run collections/vetcare-smoke.postman_collection.json
+          -e environments/local.postman_environment.json
+          -r cli,html --reporter-html-export reports/newman-smoke-ci.html || true
+      - name: Upload Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: newman-smoke-report
+          path: qa/postman/reports/newman-smoke-ci.html
