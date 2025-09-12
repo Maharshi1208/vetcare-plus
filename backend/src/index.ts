@@ -9,6 +9,7 @@ import { Pool } from 'pg';
 import authRoutes from './auth/routes';
 import petRoutes from './pet/routes';
 import vetRoutes from './vet/routes';
+import apptRoutes from './appt/routes';
 
 // ------------------------------
 // Create app FIRST (before any app.use)
@@ -45,6 +46,7 @@ app.get('/health/db', async (_req, res) => {
 app.use('/auth', authRoutes);
 app.use('/pets', petRoutes);
 app.use('/vets', vetRoutes);
+app.use('/appointments', apptRoutes);
 
 // Start
 app.listen(PORT, () => {

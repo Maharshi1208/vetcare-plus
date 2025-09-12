@@ -29,7 +29,8 @@ model User {
   updatedAt    DateTime @updatedAt
 
   // Back-relation: one owner → many pets
-  pets Pet[]
+  pets        Pet[]
+  Appointment Appointment[]
 }
 
 model Pet {
@@ -46,8 +47,9 @@ model Pet {
   photoUrl String?
   archived Boolean   @default(false)
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  Appointment Appointment[]
 
   @@index([ownerId])
   @@index([name])
@@ -67,6 +69,7 @@ model Vet {
   updatedAt      DateTime @updatedAt
 
   availabilities Availability[]
+  Appointment    Appointment[]
 }
 
 model Availability {
@@ -87,4 +90,27 @@ model Availability {
 
   @@index([vetId])
   @@index([startAt])
+}
+
+model Appointment {
+  id        String            @id @default(cuid())
+  petId     String
+  vetId     String
+  ownerId   String
+  dateTime  DateTime
+  status    AppointmentStatus @default(BOOKED)
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+
+  pet   Pet  @relation(fields: [petId], references: [id], onDelete: Cascade)
+  vet   Vet  @relation(fields: [vetId], references: [id], onDelete: Cascade)
+  owner User @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@index([dateTime])
+}
+
+enum AppointmentStatus {
+  BOOKED
+  COMPLETED
+  CANCELLED
 }
