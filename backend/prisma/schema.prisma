@@ -1,3 +1,5 @@
+// Prisma schema for VetCare+
+
 generator client {
   provider = "prisma-client-js"
 }
@@ -7,110 +9,127 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-/**
- * ---------- Enums ----------
- */
+//////////////////////
+// Enums
+//////////////////////
+
 enum Role {
   OWNER
   VET
   ADMIN
 }
 
-/**
- * ---------- Models ----------
- */
-model User {
-  id           String   @id @default(cuid())
-  name         String?
-  email        String   @unique
-  passwordHash String
-  role         Role     @default(OWNER)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+enum ApptStatus {
+  BOOKED
+  COMPLETED
+  CANCELLED
+}
 
-  // Back-relation: one owner → many pets
-  pets        Pet[]
-  Appointment Appointment[]
+enum PaymentStatus {
+  PENDING
+  SUCCESS
+  FAILED
+}
+
+//////////////////////
+// Models
+//////////////////////
+
+model User {
+  id           String  @id @default(cuid())
+  email        String  @unique
+  name         String?
+  passwordHash String
+  role         Role    @default(OWNER)
+
+  // relations
+  pets         Pet[]
+  appointments Appointment[] @relation("UserAppointments")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model Pet {
-  id String @id @default(cuid())
+  id        String    @id @default(cuid())
+  ownerId   String
+  owner     User      @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  name      String
+  species   String?
+  breed     String?
+  dob       DateTime?
+  photoUrl  String?
+  archived  Boolean   @default(false)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
 
-  // FK to User
-  ownerId String
-  owner   User   @relation(fields: [ownerId], references: [id], onDelete: Cascade)
-
-  name     String
-  species  String
-  breed    String?
-  dob      DateTime?
-  photoUrl String?
-  archived Boolean   @default(false)
-
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
-  Appointment Appointment[]
+  appointments Appointment[]
 
   @@index([ownerId])
-  @@index([name])
 }
 
-/**
- * ---------- Vet + Availability ----------
- */
 model Vet {
   id             String   @id @default(cuid())
   name           String
   specialization String?
-  email          String?  @unique
+  email          String?
   phone          String?
   archived       Boolean  @default(false)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  availabilities Availability[]
-  Appointment    Appointment[]
+  availability Availability[]
+  appointments Appointment[]
+
+  @@index([name])
 }
 
 model Availability {
-  id String @id @default(cuid())
-
-  vetId String
-  vet   Vet    @relation(fields: [vetId], references: [id], onDelete: Cascade)
-
-  startAt  DateTime
-  endAt    DateTime
-  isBooked Boolean  @default(false)
-
+  id        String   @id @default(cuid())
+  vetId     String
+  vet       Vet      @relation(fields: [vetId], references: [id], onDelete: Cascade)
+  startAt   DateTime
+  endAt     DateTime
+  isBooked  Boolean  @default(false)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-  // NOTE: Prisma doesn't support @@check; endAt > startAt is enforced in API validation.
-  // You may also add a unique composite to prevent exact duplicate slots:
-  // @@unique([vetId, startAt, endAt])
 
   @@index([vetId])
   @@index([startAt])
 }
 
 model Appointment {
-  id        String            @id @default(cuid())
-  petId     String
-  vetId     String
-  ownerId   String
-  dateTime  DateTime
-  status    AppointmentStatus @default(BOOKED)
-  createdAt DateTime          @default(now())
-  updatedAt DateTime          @updatedAt
+  id String @id @default(cuid())
 
-  pet   Pet  @relation(fields: [petId], references: [id], onDelete: Cascade)
-  vet   Vet  @relation(fields: [vetId], references: [id], onDelete: Cascade)
-  owner User @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  petId String
+  pet   Pet    @relation(fields: [petId], references: [id], onDelete: Cascade)
 
+  vetId String
+  vet   Vet    @relation(fields: [vetId], references: [id], onDelete: Cascade)
+
+  ownerId String
+  owner   User   @relation("UserAppointments", fields: [ownerId], references: [id], onDelete: Cascade)
+
+  dateTime DateTime
+  status   ApptStatus @default(BOOKED)
+
+  payment Payment?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([petId])
+  @@index([vetId])
+  @@index([ownerId])
   @@index([dateTime])
 }
 
-enum AppointmentStatus {
-  BOOKED
-  COMPLETED
-  CANCELLED
+model Payment {
+  id            String        @id @default(cuid())
+  appointmentId String        @unique
+  appointment   Appointment   @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  amountCents   Int
+  status        PaymentStatus @default(PENDING)
+  reference     String?
+  createdAt     DateTime      @default(now())
 }
