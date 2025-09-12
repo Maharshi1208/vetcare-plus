@@ -1,0 +1,24 @@
+name: QA - Playwright (manual)
+on:
+  workflow_dispatch:
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install Playwright
+        working-directory: qa/playwright
+        run: |
+          npm ci || npm i
+          npx playwright install --with-deps
+      - name: Run tests
+        working-directory: qa/playwright
+        run: npx playwright test || true
+      - name: Upload Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-html-report
+          path: qa/playwright/reports/html
