@@ -12,42 +12,21 @@ import vetRoutes from './vet/routes';
 import apptRoutes from './appt/routes';
 import paymentRoutes from './payments/routes';
 import healthRoutes from './health/routes';
+import reportsRoutes from './reports/routes'; // <- NEW
 
-// -----------------------------
-// Create app FIRST
 // -----------------------------
 const app = express();
-
-// Middleware
 app.use(cors());
 app.use(express.json());
 
-// ENV
 const PORT = Number(process.env.PORT || 4000);
 const DATABASE_URL = process.env.DATABASE_URL as string;
-
-// PG pool (for health check)
 const pool = new Pool({ connectionString: DATABASE_URL });
 
-// -----------------------------
-// Health / root routes (public)
-// -----------------------------
-app.get('/', (_req, res) => {
-  res.send('VetCare+ API is running');
-});
-
-app.get('/health', (_req, res) => {
-  res.status(200).json({
-    ok: true,
-    uptime: process.uptime(),
-    timestamp: new Date().toISOString(),
-  });
-});
-
-app.get('/ping', (_req, res) => {
-  res.json({ ok: true, msg: 'VetCare+ API up' });
-});
-
+// Health
+app.get('/', (_req, res) => res.send('VetCare+ API is running'));
+app.get('/health', (_req, res) => res.status(200).json({ ok: true, uptime: process.uptime(), timestamp: new Date().toISOString() }));
+app.get('/ping', (_req, res) => res.json({ ok: true, msg: 'VetCare+ API up' }));
 app.get('/health/db', async (_req, res) => {
   try {
     const r = await pool.query('SELECT 1 as ok');
@@ -58,18 +37,15 @@ app.get('/health/db', async (_req, res) => {
   }
 });
 
-// -----------------------------
 // Feature routes
-// -----------------------------
 app.use('/auth', authRoutes);
 app.use('/pets', petRoutes);
 app.use('/vets', vetRoutes);
 app.use('/appointments', apptRoutes);
 app.use('/payments', paymentRoutes);
 app.use('/pet-health', healthRoutes);
-// -----------------------------
-// Start & graceful shutdown
-// -----------------------------
+app.use('/reports', reportsRoutes); // <- NEW
+
 app.listen(PORT, () => {
   console.log(`API listening on http://localhost:${PORT}`);
 });
