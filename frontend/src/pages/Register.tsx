@@ -4,12 +4,12 @@ import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { register as apiRegister } from "../services/auth";
 import { useAuth } from "../context/AuthContext";
-import { useNavigate, Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import Input from "../components/ui/Input";
 import PasswordInput from "../components/ui/PasswordInput";
 import Button from "../components/ui/Button";
 import toast from "react-hot-toast";
-import ModalAuthLayout from "../layouts/ModalAuthLayout";
+import CenteredAuthLayout from "../layouts/CenteredAuthLayout";
 
 const schema = z.object({
   name: z.string().min(2, "Enter your name"),
@@ -23,9 +23,7 @@ const schema = z.object({
 type FormData = z.infer<typeof schema>;
 
 export default function Register() {
-  const { register: fReg, handleSubmit, formState: { errors, isSubmitting } } = useForm<FormData>({
-    resolver: zodResolver(schema),
-  });
+  const { register: fReg, handleSubmit, formState: { errors, isSubmitting } } = useForm<FormData>({ resolver: zodResolver(schema) });
   const { login } = useAuth();
   const nav = useNavigate();
 
@@ -45,11 +43,17 @@ export default function Register() {
   };
 
   return (
-    <ModalAuthLayout
+    <CenteredAuthLayout
       title="Create account"
       subtitle="Join VetCare+ to manage your pet clinic workflow."
-      altLinkText="I already have an account"
-      altLinkTo="/login"
+      footer={
+        <p className="text-sm mt-6 text-center text-slate-600 dark:text-slate-300">
+          Already have an account?{" "}
+          <Link to="/login" className="underline text-emerald-700 dark:text-emerald-400 hover:opacity-90">
+            Sign in
+          </Link>
+        </p>
+      }
     >
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
         <Input
@@ -78,15 +82,9 @@ export default function Register() {
           {...fReg("confirmPassword")}
         />
         <Button type="submit" fullWidth loading={isSubmitting}>
-          Continue
+          Create account
         </Button>
       </form>
-
-      <div className="mt-4 text-center">
-        <Link to="#" className="text-sm text-slate-600 dark:text-slate-300 hover:underline">
-          Need help?
-        </Link>
-      </div>
-    </ModalAuthLayout>
+    </CenteredAuthLayout>
   );
 }
