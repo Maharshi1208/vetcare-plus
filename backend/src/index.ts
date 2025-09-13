@@ -11,6 +11,7 @@ import petRoutes from './pet/routes';
 import vetRoutes from './vet/routes';
 import apptRoutes from './appt/routes';
 import paymentRoutes from './payments/routes';
+import healthRoutes from './health/routes';
 
 // -----------------------------
 // Create app FIRST
@@ -65,7 +66,7 @@ app.use('/pets', petRoutes);
 app.use('/vets', vetRoutes);
 app.use('/appointments', apptRoutes);
 app.use('/payments', paymentRoutes);
-
+app.use('/pet-health', healthRoutes);
 // -----------------------------
 // Start & graceful shutdown
 // -----------------------------
