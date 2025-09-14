@@ -1,6 +1,7 @@
 import dotenv from 'dotenv';
 dotenv.config();
 
+import "./config/env";
 import express from 'express';
 import cors from 'cors';
 import { Pool } from 'pg';
@@ -12,7 +13,8 @@ import vetRoutes from './vet/routes';
 import apptRoutes from './appt/routes';
 import paymentRoutes from './payments/routes';
 import healthRoutes from './health/routes';
-import reportsRoutes from './reports/routes'; // <- NEW
+import adminRoutes from './admin/routes';
+import { PORT, DATABASE_URL } from "./config/env";
 
 // -----------------------------
 const app = express();
@@ -44,7 +46,7 @@ app.use('/vets', vetRoutes);
 app.use('/appointments', apptRoutes);
 app.use('/payments', paymentRoutes);
 app.use('/pet-health', healthRoutes);
-app.use('/reports', reportsRoutes); // <- NEW
+app.use('/admin', adminRoutes);
 
 app.listen(PORT, () => {
   console.log(`API listening on http://localhost:${PORT}`);
