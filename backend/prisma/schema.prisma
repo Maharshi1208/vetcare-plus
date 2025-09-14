@@ -64,6 +64,8 @@ model Pet {
   updatedAt DateTime  @updatedAt
 
   appointments Appointment[]
+  vaccinations Vaccination[]
+  medications  Medication[]
 
   @@index([ownerId])
 }
@@ -80,6 +82,8 @@ model Vet {
 
   availability Availability[]
   appointments Appointment[]
+  vaccinations Vaccination[]
+  medications  Medication[]
 
   @@index([name])
 }
@@ -132,4 +136,44 @@ model Payment {
   status        PaymentStatus @default(PENDING)
   reference     String?
   createdAt     DateTime      @default(now())
+}
+
+model Vaccination {
+  id    String @id @default(cuid())
+  petId String
+  pet   Pet    @relation(fields: [petId], references: [id], onDelete: Cascade)
+
+  vetId String?
+  vet   Vet?    @relation(fields: [vetId], references: [id], onDelete: SetNull)
+
+  vaccineName String
+  givenDate   DateTime
+  nextDueDate DateTime?
+  notes       String?
+
+  createdAt DateTime @default(now())
+
+  @@index([petId])
+  @@index([givenDate])
+}
+
+model Medication {
+  id    String @id @default(cuid())
+  petId String
+  pet   Pet    @relation(fields: [petId], references: [id], onDelete: Cascade)
+
+  prescribedById String?
+  prescribedBy   Vet?    @relation(fields: [prescribedById], references: [id], onDelete: SetNull)
+
+  name      String
+  dosage    String?
+  frequency String?
+  startDate DateTime
+  endDate   DateTime?
+  notes     String?
+
+  createdAt DateTime @default(now())
+
+  @@index([petId])
+  @@index([startDate])
 }
