@@ -41,10 +41,15 @@ model User {
   name         String?
   passwordHash String
   role         Role    @default(OWNER)
+  suspended    Boolean @default(false)
 
   // relations
   pets         Pet[]
   appointments Appointment[] @relation("UserAppointments")
+
+  // audit
+  actorLogs  AuditLog[] @relation("ActorLogs")
+  targetLogs AuditLog[] @relation("TargetLogs")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -176,4 +181,21 @@ model Medication {
 
   @@index([petId])
   @@index([startDate])
+}
+
+model AuditLog {
+  id      String @id @default(cuid())
+  actorId String
+  actor   User   @relation("ActorLogs", fields: [actorId], references: [id], onDelete: Cascade)
+
+  targetUserId String?
+  targetUser   User?   @relation("TargetLogs", fields: [targetUserId], references: [id], onDelete: SetNull)
+
+  action    String // e.g., "SUSPEND_USER", "REACTIVATE_USER", "CHANGE_ROLE"
+  details   String?
+  createdAt DateTime @default(now())
+
+  @@index([actorId])
+  @@index([targetUserId])
+  @@index([createdAt])
 }
