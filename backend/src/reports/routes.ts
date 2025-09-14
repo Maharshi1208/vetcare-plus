@@ -1,176 +1,156 @@
-import { Router } from "express";
-import { prisma } from "../lib/prisma";
-import { requireAuth, requireRole } from "../middleware/auth";
-import { z } from "zod";
+import { Router, Request, Response } from 'express';
+import { prisma } from '../lib/prisma';
+import { requireAuth, requireRole } from '../middleware/auth';
 
 const router = Router();
-const err = (e: unknown) => (e instanceof Error ? e.message : "unexpected error");
 
-// ---------- Zod schemas ----------
-const RangeSchema = z.object({
-  from: z.coerce.date().optional(),
-  to: z.coerce.date().optional(),
-});
+// Use string literals for statuses (avoid enum import issues)
+const STATUS = {
+  BOOKED: 'BOOKED',
+  COMPLETED: 'COMPLETED',
+  CANCELLED: 'CANCELLED',
+} as const;
 
-const DaySchema = z.object({
-  date: z.coerce.date(),
-  vetId: z.string().optional(),
-});
-
-// ---------- /reports/kpi?from=&to= ----------
-router.get("/kpi", requireAuth, requireRole("ADMIN"), async (req, res) => {
-  const parsed = RangeSchema.safeParse(req.query);
-  if (!parsed.success) return res.status(400).json({ ok: false, error: parsed.error.issues });
-
-  const { from, to } = parsed.data;
-
+/**
+ * GET /reports/owner/summary?windowDays=30
+ * Auth: any logged-in user (scoped to ownerId)
+ */
+router.get('/owner/summary', requireAuth, async (req: any, res: Response) => {
   try {
-    // Appointments within range
-    const whereRange: any = {};
-    if (from || to) {
-      whereRange.dateTime = {
-        gte: from ?? undefined,
-        lte: to ?? undefined,
-      };
-    }
-
-    const [booked, cancelled, payments] = await Promise.all([
-      prisma.appointment.count({ where: { ...whereRange, status: "BOOKED" } }),
-      prisma.appointment.count({ where: { ...whereRange, status: "CANCELLED" } }),
-      prisma.payment.findMany({
-        where: {
-          appointment: { ...(whereRange.dateTime ? { dateTime: whereRange.dateTime } : {}) },
-          status: "SUCCESS",
-        },
-        select: { amountCents: true },
-      }),
-    ]);
-
-    // Upcoming vaccinations (next 30 days)
+    const windowDays = Math.max(1, Number(req.query.windowDays ?? 30));
     const now = new Date();
-    const soon = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
-    const upcomingVacc = await prisma.vaccination.count({
-      where: { nextDueDate: { gte: now, lte: soon } },
+    const to = new Date(now.getTime() + windowDays * 24 * 60 * 60 * 1000);
+
+    const ownerId = req.user.id as string;
+
+    const pets = await prisma.pet.findMany({
+      where: { ownerId, archived: false },
+      select: { id: true, name: true },
     });
+    const petIds = pets.map(p => p.id);
 
-    const revenueCents = payments.reduce((sum, p) => sum + p.amountCents, 0);
-
-    res.json({
-      ok: true,
-      kpi: {
-        timeWindow: { from: from ?? null, to: to ?? null },
-        bookings: booked,
-        cancellations: cancelled,
-        upcomingVaccinations30d: upcomingVacc,
-        mockRevenueCents: revenueCents,
+    const upcomingAppointments = await prisma.appointment.findMany({
+      where: {
+        ownerId,
+        status: STATUS.BOOKED,
+        dateTime: { gte: now, lte: to },
       },
-    });
-  } catch (e) {
-    res.status(500).json({ ok: false, error: err(e) });
-  }
-});
-
-// ---------- /reports/schedule?date=YYYY-MM-DD[&vetId=] ----------
-router.get("/schedule", requireAuth, requireRole("ADMIN"), async (req, res) => {
-  const parsed = DaySchema.safeParse({
-    date: req.query.date,
-    vetId: req.query.vetId,
-  });
-  if (!parsed.success) return res.status(400).json({ ok: false, error: parsed.error.issues });
-
-  const { date, vetId } = parsed.data;
-
-  try {
-    const start = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), 0, 0, 0));
-    const end = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), 23, 59, 59, 999));
-
-    const where: any = { dateTime: { gte: start, lte: end } };
-    if (vetId) where.vetId = vetId;
-
-    const appts = await prisma.appointment.findMany({
-      where,
-      orderBy: { dateTime: "asc" },
-      select: {
-        id: true, status: true, dateTime: true,
-        vet: { select: { id: true, name: true } },
-        pet: { select: { id: true, name: true } },
-        owner: { select: { id: true, email: true, name: true } },
-        payment: { select: { status: true, amountCents: true } },
-      },
-    });
-
-    res.json({ ok: true, schedule: appts });
-  } catch (e) {
-    res.status(500).json({ ok: false, error: err(e) });
-  }
-});
-
-// ---------- /reports/export.csv?from=&to= ----------
-router.get("/export.csv", requireAuth, requireRole("ADMIN"), async (req, res) => {
-  const parsed = RangeSchema.safeParse(req.query);
-  if (!parsed.success) return res.status(400).json({ ok: false, error: parsed.error.issues });
-
-  const { from, to } = parsed.data;
-
-  try {
-    const where: any = {};
-    if (from || to) {
-      where.dateTime = {
-        gte: from ?? undefined,
-        lte: to ?? undefined,
-      };
-    }
-
-    const rows = await prisma.appointment.findMany({
-      where,
-      orderBy: { dateTime: "asc" },
+      orderBy: { dateTime: 'asc' },
       select: {
         id: true,
         dateTime: true,
         status: true,
-        vet: { select: { name: true } },
-        pet: { select: { name: true } },
-        owner: { select: { email: true } },
-        payment: { select: { status: true, amountCents: true, reference: true } },
+        pet: { select: { id: true, name: true } },
+        vet: { select: { id: true, name: true } },
       },
     });
 
-    // CSV build
-    const header = [
-      "appointment_id",
-      "date_time_iso",
-      "status",
-      "vet_name",
-      "pet_name",
-      "owner_email",
-      "payment_status",
-      "amount_cents",
-      "payment_ref",
-    ].join(",");
+    // Use schema-aligned fields: vaccineName, givenDate, nextDueDate
+    const dueVaccinations = await prisma.vaccination.findMany({
+      where: {
+        petId: { in: petIds.length ? petIds : ['__none__'] },
+        nextDueDate: { gte: now, lte: to },
+      },
+      orderBy: { nextDueDate: 'asc' },
+      select: {
+        id: true,
+        vaccineName: true,
+        givenDate: true,
+        nextDueDate: true,
+        pet: { select: { id: true, name: true } },
+      },
+    });
 
-    const lines = rows.map(r =>
-      [
-        r.id,
-        r.dateTime.toISOString(),
-        r.status,
-        r.vet?.name ?? "",
-        r.pet?.name ?? "",
-        r.owner?.email ?? "",
-        r.payment?.status ?? "",
-        r.payment?.amountCents ?? "",
-        r.payment?.reference ?? "",
-      ]
-        .map(v => String(v).replace(/"/g, '""'))
-        .map(v => (v.includes(",") ? `"${v}"` : v))
-        .join(",")
-    );
+    // Active medications (no endDate or endDate in future)
+    const activeMedications = await prisma.medication.findMany({
+      where: {
+        petId: { in: petIds.length ? petIds : ['__none__'] },
+        OR: [{ endDate: null }, { endDate: { gte: now } }],
+      },
+      orderBy: { startDate: 'desc' },
+      select: {
+        id: true,
+        name: true,
+        dosage: true,
+        frequency: true,
+        startDate: true,
+        endDate: true,
+        pet: { select: { id: true, name: true } },
+      },
+    });
 
-    const csv = [header, ...lines].join("\n");
-    res.setHeader("Content-Type", "text/csv");
-    res.setHeader("Content-Disposition", `attachment; filename="appointments_export.csv"`);
-    res.send(csv);
-  } catch (e) {
-    res.status(500).json({ ok: false, error: err(e) });
+    res.json({
+      ok: true,
+      windowDays,
+      counts: {
+        pets: pets.length,
+        upcomingAppointments: upcomingAppointments.length,
+        dueVaccinations: dueVaccinations.length,
+        activeMedications: activeMedications.length,
+      },
+      pets,
+      upcomingAppointments,
+      dueVaccinations,
+      activeMedications,
+    });
+  } catch (err: any) {
+    res.status(500).json({ ok: false, error: err?.message || 'report error' });
+  }
+});
+
+/**
+ * GET /reports/admin/kpi?from=ISO&to=ISO
+ * Auth: ADMIN
+ */
+router.get('/admin/kpi', requireAuth, requireRole('ADMIN'), async (req: Request, res: Response) => {
+  try {
+    const from = req.query.from ? new Date(String(req.query.from)) : new Date('1970-01-01T00:00:00.000Z');
+    const to = req.query.to ? new Date(String(req.query.to)) : new Date('2999-12-31T23:59:59.999Z');
+
+    const whereRange = { dateTime: { gte: from, lte: to } };
+
+    const [booked, completed, cancelled, total, uniqueOwners] = await Promise.all([
+      prisma.appointment.count({ where: { ...whereRange, status: STATUS.BOOKED } }),
+      prisma.appointment.count({ where: { ...whereRange, status: STATUS.COMPLETED } }),
+      prisma.appointment.count({ where: { ...whereRange, status: STATUS.CANCELLED } }),
+      prisma.appointment.count({ where: whereRange }),
+      prisma.appointment.groupBy({
+        by: ['ownerId'],
+        where: whereRange,
+        _count: { ownerId: true },
+      }),
+    ]);
+
+    const mockRevenue = completed * 50;
+
+    const byVet = await prisma.appointment.groupBy({
+      by: ['vetId'],
+      where: whereRange,
+      _count: { vetId: true },
+      orderBy: { _count: { vetId: 'desc' } },
+      take: 5,
+    });
+
+    const vetIds = byVet.map(v => v.vetId).filter(Boolean) as string[];
+    const vets = vetIds.length
+      ? await prisma.vet.findMany({ where: { id: { in: vetIds } }, select: { id: true, name: true } })
+      : [];
+
+    const topVets = byVet.map(v => ({
+      vetId: v.vetId,
+      name: vets.find(x => x.id === v.vetId)?.name ?? 'Unknown Vet',
+      count: v._count.vetId,
+    }));
+
+    res.json({
+      ok: true,
+      window: { from, to },
+      totals: { total, booked, completed, cancelled, uniqueOwners: uniqueOwners.length },
+      mockRevenue,
+      topVets,
+    });
+  } catch (err: any) {
+    res.status(500).json({ ok: false, error: err?.message || 'kpi error' });
   }
 });
 
