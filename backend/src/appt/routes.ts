@@ -83,11 +83,16 @@ router.post("/", requireAuth, async (req: AuthedRequest, res) => {
         },
       });
 
-      // mock PENDING payment (flat amount)
-      await tx.payment.create({
-        data: { appointmentId: created.id, amountCents: 3500, status: "PENDING" },
-      });
-
+      // mock PENDING payment (flat amount)  
+         await tx.payment.create({
+         data: {
+    appointmentId: created.id,
+    amountCents: 3500,
+    status: "PENDING",
+    // provider missing here before -> add it:
+    provider: "mock",
+  },
+});
       return created;
     });
 
