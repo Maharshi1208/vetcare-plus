@@ -36,7 +36,7 @@ export default function Register() {
         localStorage.setItem("vc_user", JSON.stringify(res.user));
       } catch {}
       alert(`Account created for ${res.user.email}`);
-      nav("/");
+      nav("/welcome", { replace: true });
     } catch (e: any) {
       setError(e?.message || "Registration failed");
     } finally {

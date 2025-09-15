@@ -28,7 +28,7 @@ export default function Login() {
         localStorage.setItem("vc_user", JSON.stringify(res.user));
       } catch {}
       alert(`Welcome back, ${res.user.name || res.user.email}`);
-      nav("/");
+      nav("/welcome", { replace: true });
     } catch (e: any) {
       setError(e?.message || "Login failed");
     } finally {
