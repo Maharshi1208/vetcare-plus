@@ -42,10 +42,15 @@ model User {
   name         String?
   passwordHash String
   role         Role    @default(OWNER)
+  suspended    Boolean @default(false)
 
   // relations
   pets         Pet[]
   appointments Appointment[] @relation("UserAppointments")
+
+  // audit
+  actorLogs  AuditLog[] @relation("ActorLogs")
+  targetLogs AuditLog[] @relation("TargetLogs")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -170,18 +175,35 @@ model Medication {
 }
 
 model Payment {
-  id            String      @id @default(cuid())
-  appointmentId String      @unique
-  appointment   Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  id            String        @id @default(cuid())
+  appointmentId String        @unique
+  appointment   Appointment   @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
 
   // Use smallest currency unit to avoid floating point issues
-  amountCents Int
-  provider    String // "mock", "stripe", etc.
-  reference   String? // external reference if any
-  status      PaymentStatus @default(PENDING)
+  amountCents   Int
+  provider      String        // "mock", "stripe", etc.
+  reference     String?       // external reference if any
+  status        PaymentStatus @default(PENDING)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([appointmentId])
+}
+
+model AuditLog {
+  id           String  @id @default(cuid())
+  actorId      String
+  actor        User    @relation("ActorLogs", fields: [actorId], references: [id], onDelete: Cascade)
+
+  targetUserId String?
+  targetUser   User?   @relation("TargetLogs", fields: [targetUserId], references: [id], onDelete: SetNull)
+
+  action    String // e.g., "SUSPEND_USER", "REACTIVATE_USER", "CHANGE_ROLE"
+  details   String?
+  createdAt DateTime @default(now())
+
+  @@index([actorId])
+  @@index([targetUserId])
+  @@index([createdAt])
 }
