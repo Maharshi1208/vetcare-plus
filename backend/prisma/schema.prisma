@@ -29,6 +29,7 @@ enum PaymentStatus {
   PENDING
   SUCCESS
   FAILED
+  REFUNDED
 }
 
 //////////////////////
@@ -128,16 +129,6 @@ model Appointment {
   @@index([dateTime])
 }
 
-model Payment {
-  id            String        @id @default(cuid())
-  appointmentId String        @unique
-  appointment   Appointment   @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
-  amountCents   Int
-  status        PaymentStatus @default(PENDING)
-  reference     String?
-  createdAt     DateTime      @default(now())
-}
-
 model Vaccination {
   id    String @id @default(cuid())
   petId String
@@ -176,4 +167,21 @@ model Medication {
 
   @@index([petId])
   @@index([startDate])
+}
+
+model Payment {
+  id            String      @id @default(cuid())
+  appointmentId String      @unique
+  appointment   Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+
+  // Use smallest currency unit to avoid floating point issues
+  amountCents Int
+  provider    String // "mock", "stripe", etc.
+  reference   String? // external reference if any
+  status      PaymentStatus @default(PENDING)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([appointmentId])
 }

@@ -12,8 +12,8 @@ import vetRoutes from './vet/routes';
 import apptRoutes from './appt/routes';
 import paymentRoutes from './payments/routes';
 import healthRoutes from './health/routes';
-import reportsRoutes from './reports/routes'; // <- NEW
-
+import reportsRoutes from './reports/routes'; 
+import payRoutes from './pay/routes';
 // -----------------------------
 const app = express();
 app.use(cors());
@@ -44,8 +44,8 @@ app.use('/vets', vetRoutes);
 app.use('/appointments', apptRoutes);
 app.use('/payments', paymentRoutes);
 app.use('/pet-health', healthRoutes);
-app.use('/reports', reportsRoutes); // <- NEW
-
+app.use('/reports', reportsRoutes); 
+app.use('/payments', payRoutes);
 app.listen(PORT, () => {
   console.log(`API listening on http://localhost:${PORT}`);
 });
