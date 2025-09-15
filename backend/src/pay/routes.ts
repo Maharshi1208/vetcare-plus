@@ -1,45 +1,47 @@
-import { Router } from "express";
+import { Router, Request, Response } from "express";
 import { prisma } from "../lib/prisma";
 import { requireAuth } from "../middleware/auth";
 
 const router = Router();
 
-/**
- * Helpers
- */
-function isAdmin(user: any) { return user?.role === "ADMIN"; }
-
-// Owner of appointment or admin can act
-async function canActOnAppointment(userId: string, apptId: string, admin: boolean) {
-  if (admin) return true;
-  const appt = await prisma.appointment.findUnique({ where: { id: apptId }, select: { ownerId: true }});
-  return appt?.ownerId === userId;
+// -----------------
+// Helpers
+// -----------------
+function isAdmin(req: Request) {
+  return req.user?.role === "ADMIN";
+}
+function isOwner(req: Request, ownerId: string) {
+  return req.user?.id === ownerId;
 }
 
 /**
  * POST /payments
- * Create a payment for an appointment that does NOT already have one.
- * Enforces one Payment per Appointment (appointmentId is unique).
+ * Create a mock payment for an appointment (only if none exists).
+ * Body: { appointmentId: string, amountCents: number, provider: string }
  */
-router.post("/", requireAuth, async (req, res) => {
+router.post("/", requireAuth, async (req: Request, res: Response) => {
   try {
-    const user = (req as any).user;
-    const { appointmentId, amountCents, provider = "mock" } = req.body as {
+    const { appointmentId, amountCents, provider } = req.body as {
       appointmentId: string;
       amountCents: number;
-      provider?: string;
+      provider: string;
     };
 
-    if (!appointmentId || !amountCents) {
-      return res.status(400).json({ ok: false, error: "appointmentId and amountCents are required" });
+    const appt = await prisma.appointment.findUnique({
+      where: { id: appointmentId },
+      select: { id: true, ownerId: true, payment: { select: { id: true } } },
+    });
+    if (!appt) return res.status(404).json({ ok: false, error: "Appointment not found" });
+
+    if (!isOwner(req, appt.ownerId) && !isAdmin(req)) {
+      return res.status(403).json({ ok: false, error: "Forbidden" });
     }
 
-    const allowed = await canActOnAppointment(user.id, appointmentId, isAdmin(user));
-    if (!allowed) return res.status(403).json({ ok: false, error: "Forbidden" });
-
-    // ensure appointment exists and doesn’t already have payment
-    const existing = await prisma.payment.findUnique({ where: { appointmentId } });
-    if (existing) return res.status(409).json({ ok: false, error: "Payment already exists for this appointment" });
+    if (appt.payment) {
+      return res
+        .status(400)
+        .json({ ok: false, error: "Payment already exists for this appointment" });
+    }
 
     const payment = await prisma.payment.create({
       data: {
@@ -49,122 +51,175 @@ router.post("/", requireAuth, async (req, res) => {
         status: "PENDING",
       },
       select: {
-        id: true, amountCents: true, provider: true, status: true, createdAt: true,
-        appointment: {
-          select: {
-            id: true, dateTime: true, status: true,
-            pet: { select: { id: true, name: true }},
-            vet: { select: { id: true, name: true }},
-            ownerId: true
-          }
-        }
-      }
+        id: true,
+        amountCents: true,
+        provider: true,
+        reference: true,
+        status: true,
+        createdAt: true,
+        appointment: { select: { id: true, ownerId: true } },
+      },
     });
 
     return res.status(201).json({ ok: true, payment });
   } catch (err: any) {
-    return res.status(400).json({ ok: false, error: err?.message || "create payment error" });
+    return res.status(500).json({ ok: false, error: err?.message || "error" });
   }
 });
 
 /**
  * GET /payments
- * Admin: all payments; Owner: only their payments.
+ * List payments (admin sees all; owner sees own).
  */
-router.get("/", requireAuth, async (req, res) => {
+router.get("/", requireAuth, async (req: Request, res: Response) => {
   try {
-    const user = (req as any).user;
-    const whereFilter = isAdmin(user) ? {} : { appointment: { ownerId: user.id } };
+    const where = isAdmin(req) ? {} : { appointment: { ownerId: req.user!.id } };
 
     const payments = await prisma.payment.findMany({
-      where: whereFilter,
+      where,
       orderBy: { createdAt: "desc" },
       select: {
-        id: true, amountCents: true, provider: true, reference: true, status: true, createdAt: true,
+        id: true,
+        amountCents: true,
+        provider: true,
+        reference: true,
+        status: true,
+        createdAt: true,
         appointment: {
           select: {
-            id: true, dateTime: true, status: true,
-            pet: { select: { id: true, name: true }},
-            vet: { select: { id: true, name: true }},
-            ownerId: true
-          }
-        }
-      }
+            id: true,
+            dateTime: true,
+            status: true,
+            ownerId: true,
+            pet: { select: { id: true, name: true } },
+            vet: { select: { id: true, name: true } },
+          },
+        },
+      },
     });
 
     return res.json({ ok: true, payments });
   } catch (err: any) {
-    return res.status(400).json({ ok: false, error: err?.message || "list payments error" });
+    return res.status(500).json({ ok: false, error: err?.message || "error" });
   }
 });
 
 /**
- * POST /payments/:id/complete   -> status: SUCCESS
- * POST /payments/:id/fail       -> status: FAILED
- * POST /payments/:id/refund     -> status: REFUNDED (admin only)
+ * POST /payments/:id/complete
+ * Transition: PENDING -> SUCCESS
+ * Allowed: appointment owner or admin
  */
-router.post("/:id/complete", requireAuth, async (req, res) => {
+router.post("/:id/complete", requireAuth, async (req: Request, res: Response) => {
   try {
-    const user = (req as any).user;
     const id = req.params.id;
 
-    // Owner of linked appointment or admin
-    const pay = await prisma.payment.findUnique({ where: { id }, select: { appointment: { select: { ownerId: true }}}});
-    if (!pay) return res.status(404).json({ ok: false, error: "Payment not found" });
-    if (!isAdmin(user) && pay.appointment.ownerId !== user.id) {
+    const p = await prisma.payment.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        status: true,
+        appointment: { select: { ownerId: true } },
+      },
+    });
+    if (!p) return res.status(404).json({ ok: false, error: "Payment not found" });
+
+    if (!isOwner(req, p.appointment.ownerId) && !isAdmin(req)) {
       return res.status(403).json({ ok: false, error: "Forbidden" });
+    }
+    if (p.status !== "PENDING") {
+      return res
+        .status(400)
+        .json({ ok: false, error: `Only PENDING can be completed (current=${p.status})` });
     }
 
     const updated = await prisma.payment.update({
       where: { id },
-      data: { status: "SUCCESS", reference: `MOCK-SUCCESS-${Date.now()}` },
-      select: { id: true, status: true, reference: true }
+      data: {
+        status: "SUCCESS",
+        reference: `MOCK-${Math.random().toString(36).slice(2, 10).toUpperCase()}`,
+      },
+      select: { id: true, status: true, reference: true },
     });
+
     return res.json({ ok: true, payment: updated });
   } catch (err: any) {
-    return res.status(400).json({ ok: false, error: err?.message || "complete error" });
+    return res.status(500).json({ ok: false, error: err?.message || "error" });
   }
 });
 
-router.post("/:id/fail", requireAuth, async (req, res) => {
+/**
+ * POST /payments/:id/fail
+ * Transition: PENDING -> FAILED
+ * Allowed: appointment owner or admin
+ */
+router.post("/:id/fail", requireAuth, async (req: Request, res: Response) => {
   try {
-    const user = (req as any).user;
     const id = req.params.id;
 
-    const pay = await prisma.payment.findUnique({ where: { id }, select: { appointment: { select: { ownerId: true }}}});
-    if (!pay) return res.status(404).json({ ok: false, error: "Payment not found" });
-    if (!isAdmin(user) && pay.appointment.ownerId !== user.id) {
+    const p = await prisma.payment.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        status: true,
+        appointment: { select: { ownerId: true } },
+      },
+    });
+    if (!p) return res.status(404).json({ ok: false, error: "Payment not found" });
+
+    if (!isOwner(req, p.appointment.ownerId) && !isAdmin(req)) {
       return res.status(403).json({ ok: false, error: "Forbidden" });
+    }
+    if (p.status !== "PENDING") {
+      return res
+        .status(400)
+        .json({ ok: false, error: `Only PENDING can be failed (current=${p.status})` });
     }
 
     const updated = await prisma.payment.update({
       where: { id },
-      data: { status: "FAILED", reference: `MOCK-FAILED-${Date.now()}` },
-      select: { id: true, status: true, reference: true }
+      data: { status: "FAILED" },
+      select: { id: true, status: true },
     });
+
     return res.json({ ok: true, payment: updated });
   } catch (err: any) {
-    return res.status(400).json({ ok: false, error: err?.message || "fail error" });
+    return res.status(500).json({ ok: false, error: err?.message || "error" });
   }
 });
 
-router.post("/:id/refund", requireAuth, async (req, res) => {
+/**
+ * POST /payments/:id/refund
+ * Transition: SUCCESS -> REFUNDED
+ * Allowed: admin only
+ */
+router.post("/:id/refund", requireAuth, async (req: Request, res: Response) => {
   try {
-    const user = (req as any).user;
-    if (!isAdmin(user)) return res.status(403).json({ ok: false, error: "Admin only" });
+    if (!isAdmin(req)) {
+      return res.status(403).json({ ok: false, error: "Admin only" });
+    }
 
     const id = req.params.id;
-    const found = await prisma.payment.findUnique({ where: { id }, select: { id: true }});
-    if (!found) return res.status(404).json({ ok: false, error: "Payment not found" });
+    const p = await prisma.payment.findUnique({
+      where: { id },
+      select: { id: true, status: true },
+    });
+    if (!p) return res.status(404).json({ ok: false, error: "Payment not found" });
+
+    if (p.status !== "SUCCESS") {
+      return res
+        .status(400)
+        .json({ ok: false, error: `Only SUCCESS can be refunded (current=${p.status})` });
+    }
 
     const updated = await prisma.payment.update({
       where: { id },
-      data: { status: "REFUNDED", reference: `MOCK-REFUND-${Date.now()}` },
-      select: { id: true, status: true, reference: true }
+      data: { status: "REFUNDED" },
+      select: { id: true, status: true },
     });
+
     return res.json({ ok: true, payment: updated });
   } catch (err: any) {
-    return res.status(400).json({ ok: false, error: err?.message || "refund error" });
+    return res.status(500).json({ ok: false, error: err?.message || "error" });
   }
 });
 

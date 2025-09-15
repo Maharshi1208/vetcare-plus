@@ -14,6 +14,8 @@ import paymentRoutes from './payments/routes';
 import healthRoutes from './health/routes';
 import reportsRoutes from './reports/routes'; 
 import payRoutes from './pay/routes';
+import { sendMail } from "./notify/mailer";
+import notifyRoutes from "./routes/notify.routes";
 // -----------------------------
 const app = express();
 app.use(cors());
@@ -46,6 +48,8 @@ app.use('/payments', paymentRoutes);
 app.use('/pet-health', healthRoutes);
 app.use('/reports', reportsRoutes); 
 app.use('/payments', payRoutes);
+app.use("/notify", notifyRoutes);
+
 app.listen(PORT, () => {
   console.log(`API listening on http://localhost:${PORT}`);
 });

@@ -1,17 +1,24 @@
-import jwt from "jsonwebtoken";
+import jwt, { Secret } from "jsonwebtoken";
+import type { StringValue } from "ms";
 
-const JWT_SECRET = process.env.JWT_SECRET || "dev";
-const REFRESH_SECRET = process.env.REFRESH_SECRET || "dev2";
-const JWT_EXPIRES = process.env.JWT_EXPIRES || "15m";
-const REFRESH_EXPIRES = process.env.REFRESH_EXPIRES || "7d";
+const ACCESS_TOKEN_SECRET = process.env.ACCESS_TOKEN_SECRET as Secret;
+const REFRESH_TOKEN_SECRET = process.env.REFRESH_TOKEN_SECRET as Secret;
 
-export function signAccess(payload: object) {
-  return jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRES });
+const JWT_EXPIRES = (process.env.JWT_EXPIRES || "15m") as StringValue;
+const REFRESH_EXPIRES = (process.env.REFRESH_EXPIRES || "7d") as StringValue;
+
+export function signAccess(payload: Record<string, any>) {
+  return jwt.sign(payload, ACCESS_TOKEN_SECRET, { expiresIn: JWT_EXPIRES });
 }
-export function signRefresh(payload: object) {
-  return jwt.sign(payload, REFRESH_SECRET, { expiresIn: REFRESH_EXPIRES });
+
+export function signRefresh(payload: Record<string, any>) {
+  return jwt.sign(payload, REFRESH_TOKEN_SECRET, { expiresIn: REFRESH_EXPIRES });
 }
 
-export function verifyAccess(token: string) {
-  return jwt.verify(token, JWT_SECRET) as any;
+export function verifyAccess<T = any>(token: string): T {
+  return jwt.verify(token, ACCESS_TOKEN_SECRET) as T;
+}
+
+export function verifyRefresh<T = any>(token: string): T {
+  return jwt.verify(token, REFRESH_TOKEN_SECRET) as T;
 }

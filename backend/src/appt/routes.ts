@@ -1,7 +1,9 @@
 import { Router } from "express";
 import { prisma } from "../lib/prisma";
-import { requireAuth, requireRole, AuthedRequest } from "../middleware/auth";
+import { requireAuth, requireRole } from "../middleware/auth";
 import { z } from "zod";
+import { sendMail } from "../notify/mailer";
+import { renderApptBooked } from "../notify/templates/apptBooked";
 
 const router = Router();
 const msg = (e: unknown) => (e instanceof Error ? e.message : "unexpected error");
@@ -50,7 +52,7 @@ async function vetConflict(vetId: string, dateTime: Date, ignoreApptId?: string)
 
 /**
  * POST /appointments
- * Create appointment (OWNER/Admin) + create PENDING payment
+ * Create appointment (OWNER/Admin) + create PENDING payment + send confirmation email
  */
 router.post("/", requireAuth, async (req: AuthedRequest, res) => {
   const parsed = CreateApptSchema.safeParse(req.body);
@@ -76,25 +78,49 @@ router.post("/", requireAuth, async (req: AuthedRequest, res) => {
           status: "BOOKED",
         },
         select: {
-          id: true, status: true, dateTime: true,
+          id: true,
+          status: true,
+          dateTime: true,
           pet: { select: { id: true, name: true } },
           vet: { select: { id: true, name: true } },
-          ownerId: true, createdAt: true,
+          owner: { select: { email: true } }, // ⬅️ needed for email
+          ownerId: true,
+          createdAt: true,
         },
       });
 
-      // mock PENDING payment (flat amount)  
-         await tx.payment.create({
-         data: {
-    appointmentId: created.id,
-    amountCents: 3500,
-    status: "PENDING",
-    // provider missing here before -> add it:
-    provider: "mock",
-  },
-});
+      // mock PENDING payment (flat amount)
+      await tx.payment.create({
+        data: {
+          appointmentId: created.id,
+          amountCents: 3500,
+          status: "PENDING",
+          provider: "MOCK", // keep consistent with schema/other routes
+        },
+      });
+
       return created;
     });
+
+    // Fire-and-forget confirmation email if we have an email and status is BOOKED
+    if (appt.status === "BOOKED" && appt.owner?.email) {
+      const manageUrl = process.env.APP_BASE_URL
+        ? `${process.env.APP_BASE_URL}/appointments`
+        : undefined;
+
+      const { subject, html, text } = renderApptBooked({
+        petName: appt.pet?.name ?? "your pet",
+        vetName: appt.vet?.name ?? "our vet",
+        dateTimeISO: appt.dateTime.toISOString(),
+        manageUrl,
+      });
+
+      // don't await; log error if send fails
+      // eslint-disable-next-line @typescript-eslint/no-floating-promises
+      sendMail({ to: appt.owner.email, subject, html, text }).catch((e: any) => {
+        console.error("Failed to send appointment email:", e?.message || e);
+      });
+    }
 
     res.status(201).json({ ok: true, appointment: appt });
   } catch (e) {
@@ -129,7 +155,9 @@ router.get("/", requireAuth, async (req: AuthedRequest, res) => {
       where: filters,
       orderBy: { dateTime: "asc" },
       select: {
-        id: true, status: true, dateTime: true,
+        id: true,
+        status: true,
+        dateTime: true,
         pet: { select: { id: true, name: true } },
         vet: { select: { id: true, name: true } },
         payment: { select: { status: true, amountCents: true } },
@@ -151,7 +179,10 @@ router.get("/:id", requireAuth, async (req: AuthedRequest, res) => {
     const appt = await prisma.appointment.findUnique({
       where: { id: req.params.id },
       select: {
-        id: true, status: true, dateTime: true, ownerId: true,
+        id: true,
+        status: true,
+        dateTime: true,
+        ownerId: true,
         pet: { select: { id: true, name: true, ownerId: true } },
         vet: { select: { id: true, name: true } },
         payment: { select: { status: true, amountCents: true, reference: true, createdAt: true } },
@@ -184,7 +215,8 @@ router.post("/:id/cancel", requireAuth, async (req: AuthedRequest, res) => {
     const isOwner = appt.ownerId === req.user!.id;
     const isAdmin = req.user!.role === "ADMIN";
     if (!isOwner && !isAdmin) return res.status(403).json({ ok: false, error: "Forbidden" });
-    if (appt.status !== "BOOKED") return res.status(400).json({ ok: false, error: "Only BOOKED can be cancelled" });
+    if (appt.status !== "BOOKED")
+      return res.status(400).json({ ok: false, error: "Only BOOKED can be cancelled" });
 
     const updated = await prisma.appointment.update({
       where: { id: appt.id },
@@ -216,7 +248,8 @@ router.post("/:id/reschedule", requireAuth, async (req: AuthedRequest, res) => {
     const isOwner = current.ownerId === req.user!.id;
     const isAdmin = req.user!.role === "ADMIN";
     if (!isOwner && !isAdmin) return res.status(403).json({ ok: false, error: "Forbidden" });
-    if (current.status !== "BOOKED") return res.status(400).json({ ok: false, error: "Only BOOKED can be rescheduled" });
+    if (current.status !== "BOOKED")
+      return res.status(400).json({ ok: false, error: "Only BOOKED can be rescheduled" });
 
     await vetConflict(current.vetId, parsed.data.newDateTime, current.id);
 
@@ -252,5 +285,40 @@ router.patch("/:id/status", requireAuth, requireRole("ADMIN"), async (req, res) 
   }
 });
 
-export default router;
+// Manual email trigger for an appointment (ADMIN only)
+router.post("/:id/notify", requireAuth, requireRole("ADMIN"), async (req, res) => {
+  try {
+    const appt = await prisma.appointment.findUnique({
+      where: { id: req.params.id },
+      select: {
+        id: true,
+        dateTime: true,
+        pet: { select: { name: true } },
+        vet: { select: { name: true } },
+        owner: { select: { email: true } },
+      },
+    });
 
+    if (!appt) return res.status(404).json({ ok: false, error: "Appointment not found" });
+    if (!appt.owner?.email) return res.status(400).json({ ok: false, error: "Owner email missing" });
+
+    const manageUrl = process.env.APP_BASE_URL
+      ? `${process.env.APP_BASE_URL}/appointments`
+      : undefined;
+
+    const { subject, html, text } = renderApptBooked({
+      petName: appt.pet?.name ?? "your pet",
+      vetName: appt.vet?.name ?? "our vet",
+      dateTimeISO: appt.dateTime.toISOString(),
+      manageUrl,
+    });
+
+    const info = await sendMail({ to: appt.owner.email, subject, html, text });
+    res.json({ ok: true, messageId: info.messageId });
+  } catch (e: any) {
+    res.status(500).json({ ok: false, error: e?.message || "notify failed" });
+  }
+});
+
+
+export default router;
