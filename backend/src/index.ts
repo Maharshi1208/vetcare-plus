@@ -60,7 +60,7 @@ app.get('/health/db', async (_req, res) => {
 // Feature routes
 // -----------------------------
 app.use('/auth', authRoutes);
-app.use('/pets', petRoutes);
+//app.use('/pets', petRoutes);
 app.use('/vets', vetRoutes);
 // app.use('/appointments', apptRoutes); // enable after appointments PR merges
 
