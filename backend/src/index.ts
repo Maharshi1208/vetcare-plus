@@ -11,19 +11,17 @@ import authRoutes from './auth/routes';
 import petRoutes from './pet/routes';
 import vetRoutes from './vet/routes';
 import apptRoutes from './appt/routes';
-import paymentRoutes from './payments/routes';   // <- consolidate here
+// We will use the new payments router under /payments:
+import payRoutes from './pay/routes';
 import healthRoutes from './health/routes';
-import reportsRoutes from './reports/routes';    // <- keep yours
-import adminRoutes from './admin/routes';        // <- keep main
-// If you still need the experimental pay routes, mount them under a different base:
-// import payRoutes from './pay/routes';
+import reportsRoutes from './reports/routes';
+import notifyRoutes from './routes/notify.routes';
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// If you have a typed env module, you can import constants from it instead.
-// For now, keep it simple & consistent:
+// Config
 const PORT = Number(process.env.PORT || 4000);
 const DATABASE_URL = process.env.DATABASE_URL as string;
 
@@ -50,13 +48,10 @@ app.use('/auth', authRoutes);
 app.use('/pets', petRoutes);
 app.use('/vets', vetRoutes);
 app.use('/appointments', apptRoutes);
-app.use('/payments', paymentRoutes); // single source of truth
+app.use('/payments', payRoutes);         // ✅ single source of truth (new payments router)
 app.use('/pet-health', healthRoutes);
 app.use('/reports', reportsRoutes);
-app.use('/admin', adminRoutes);
-
-// If keeping experimental pay routes temporarily:
-// app.use('/pay', payRoutes);
+app.use('/notify', notifyRoutes);
 
 app.listen(PORT, () => {
   console.log(`API listening on http://localhost:${PORT}`);

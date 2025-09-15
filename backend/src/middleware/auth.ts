@@ -1,27 +1,30 @@
-import { Request, Response, NextFunction } from "express";
-import { verifyAccess } from "../auth/jwt";
+import { RequestHandler } from "express";
+import jwt, { Secret } from "jsonwebtoken";
 
-export interface AuthedRequest extends Request {
-  user?: { id: string; role: "OWNER"|"VET"|"ADMIN"; email: string };
-}
+const ACCESS_TOKEN_SECRET = process.env.ACCESS_TOKEN_SECRET as Secret;
 
-export function requireAuth(req: AuthedRequest, res: Response, next: NextFunction) {
-  const hdr = req.header("Authorization");
-  if (!hdr?.startsWith("Bearer ")) return res.status(401).json({ ok:false, error:"Missing token" });
-  const token = hdr.slice(7);
+export const requireAuth: RequestHandler = (req, res, next) => {
   try {
-    const payload = verifyAccess(token);
-    req.user = payload;
+    const auth = req.headers.authorization || "";
+    const token = auth.startsWith("Bearer ") ? auth.slice(7) : null;
+    if (!token) return res.status(401).json({ ok: false, error: "Unauthorized" });
+
+    const payload = jwt.verify(token, ACCESS_TOKEN_SECRET) as {
+      sub: string;
+      role: "OWNER" | "VET" | "ADMIN";
+      email: string;
+    };
+
+    req.user = { id: payload.sub, role: payload.role, email: payload.email };
     next();
   } catch {
-    return res.status(401).json({ ok:false, error:"Invalid token" });
+    return res.status(401).json({ ok: false, error: "Unauthorized" });
   }
-}
+};
 
-export function requireRole(...roles: Array<"OWNER"|"VET"|"ADMIN">) {
-  return (req: AuthedRequest, res: Response, next: NextFunction) => {
-    if (!req.user) return res.status(401).json({ ok:false, error:"Unauthenticated" });
-    if (!roles.includes(req.user.role)) return res.status(403).json({ ok:false, error:"Forbidden" });
+export const requireRole = (role: "OWNER" | "VET" | "ADMIN"): RequestHandler => {
+  return (req, res, next) => {
+    if (req.user?.role !== role) return res.status(403).json({ ok: false, error: "Forbidden" });
     next();
   };
-}
+};

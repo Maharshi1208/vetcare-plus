@@ -10,7 +10,10 @@ const MockResultSchema = z.object({
   result: z.enum(["SUCCESS", "FAILED"]),
 });
 
+// ------------------------------
 // Get payment for an appointment (owner/admin)
+// GET /payments/:appointmentId
+// ------------------------------
 router.get("/:appointmentId", requireAuth, async (req, res) => {
   try {
     const appt = await prisma.appointment.findUnique({
@@ -18,14 +21,24 @@ router.get("/:appointmentId", requireAuth, async (req, res) => {
       select: {
         id: true,
         ownerId: true,
-        payment: { select: { status: true, amountCents: true, reference: true, createdAt: true } },
+        payment: {
+          select: {
+            status: true,
+            amountCents: true,
+            reference: true,
+            provider: true,
+            createdAt: true,
+          },
+        },
       },
     });
     if (!appt) return res.status(404).json({ ok: false, error: "Appointment not found" });
 
     const isOwner = appt.ownerId === req.user!.id;
     const isAdmin = req.user!.role === "ADMIN";
-    if (!isOwner && !isAdmin) return res.status(403).json({ ok: false, error: "Forbidden" });
+    if (!isOwner && !isAdmin) {
+      return res.status(403).json({ ok: false, error: "Forbidden" });
+    }
 
     res.json({ ok: true, payment: appt.payment ?? null });
   } catch (e) {
@@ -33,11 +46,16 @@ router.get("/:appointmentId", requireAuth, async (req, res) => {
   }
 });
 
+// ------------------------------
 // Mock payment result (ADMIN)
-// POST /payments/:appointmentId/mock { "result": "SUCCESS" | "FAILED" }
+// POST /payments/:appointmentId/mock
+// Body: { "result": "SUCCESS" | "FAILED" }
+// ------------------------------
 router.post("/:appointmentId/mock", requireAuth, requireRole("ADMIN"), async (req, res) => {
   const parsed = MockResultSchema.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ ok: false, error: parsed.error.issues });
+  if (!parsed.success) {
+    return res.status(400).json({ ok: false, error: parsed.error.issues });
+  }
 
   try {
     const appt = await prisma.appointment.findUnique({
@@ -46,10 +64,19 @@ router.post("/:appointmentId/mock", requireAuth, requireRole("ADMIN"), async (re
     });
     if (!appt) return res.status(404).json({ ok: false, error: "Appointment not found" });
 
-    let payment = await prisma.payment.findUnique({ where: { appointmentId: appt.id } });
+    let payment = await prisma.payment.findUnique({
+      where: { appointmentId: appt.id },
+    });
+
+    // If no payment exists, create one with PENDING + provider
     if (!payment) {
       payment = await prisma.payment.create({
-        data: { appointmentId: appt.id, amountCents: 3500, status: "PENDING" },
+        data: {
+          appointmentId: appt.id,
+          amountCents: 3500,
+          status: "PENDING",
+          provider: "MOCK",
+        },
       });
     }
 
@@ -60,8 +87,17 @@ router.post("/:appointmentId/mock", requireAuth, requireRole("ADMIN"), async (re
 
     const updated = await prisma.payment.update({
       where: { appointmentId: appt.id },
-      data: { status: parsed.data.result, reference: reference ?? undefined },
-      select: { status: true, reference: true, amountCents: true, createdAt: true },
+      data: {
+        status: parsed.data.result,
+        reference: reference ?? undefined,
+      },
+      select: {
+        status: true,
+        reference: true,
+        amountCents: true,
+        provider: true,
+        createdAt: true,
+      },
     });
 
     res.json({ ok: true, payment: updated });
