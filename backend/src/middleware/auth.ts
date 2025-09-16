@@ -1,30 +1,51 @@
-import { RequestHandler } from "express";
-import jwt, { Secret } from "jsonwebtoken";
+// src/middleware/auth.ts
+import { Request, Response, NextFunction } from "express";
+import jwt from "jsonwebtoken";
 
-const ACCESS_TOKEN_SECRET = process.env.ACCESS_TOKEN_SECRET as Secret;
+// Keep your app's roles in one place
+export type Role = "OWNER" | "VET" | "ADMIN";
 
-export const requireAuth: RequestHandler = (req, res, next) => {
+type JWTPayload = { id: string; role: Role; email: string };
+
+// Augment Express Request so req.user is typed everywhere
+declare module "express-serve-static-core" {
+  interface Request {
+    user?: { id: string; role: Role; email: string };
+  }
+}
+
+// Secrets (fallback to ACCESS_TOKEN_SECRET or a dev string)
+const JWT_SECRET =
+  process.env.ACCESS_TOKEN_SECRET ||
+  process.env.JWT_SECRET ||
+  "dev_access_token_secret_change_me";
+
+// Auth: verifies Bearer token and attaches req.user
+export function requireAuth(req: Request, res: Response, next: NextFunction) {
+  const header = req.headers.authorization;
+  if (!header?.startsWith("Bearer ")) {
+    return res.status(401).json({ ok: false, error: "Unauthorized" });
+  }
+  const token = header.slice("Bearer ".length).trim();
+
   try {
-    const auth = req.headers.authorization || "";
-    const token = auth.startsWith("Bearer ") ? auth.slice(7) : null;
-    if (!token) return res.status(401).json({ ok: false, error: "Unauthorized" });
-
-    const payload = jwt.verify(token, ACCESS_TOKEN_SECRET) as {
-      sub: string;
-      role: "OWNER" | "VET" | "ADMIN";
-      email: string;
-    };
-
-    req.user = { id: payload.sub, role: payload.role, email: payload.email };
-    next();
+    const payload = jwt.verify(token, JWT_SECRET) as JWTPayload;
+    req.user = { id: payload.id, role: payload.role, email: payload.email };
+    return next();
   } catch {
     return res.status(401).json({ ok: false, error: "Unauthorized" });
   }
-};
+}
 
-export const requireRole = (role: "OWNER" | "VET" | "ADMIN"): RequestHandler => {
-  return (req, res, next) => {
-    if (req.user?.role !== role) return res.status(403).json({ ok: false, error: "Forbidden" });
-    next();
+// Role guard: only allow if user’s role is in the required list
+export function requireRole(required: Role | Role[]) {
+  const allowed = Array.isArray(required) ? required : [required];
+  return (req: Request, res: Response, next: NextFunction) => {
+    const role = req.user?.role;
+    if (!role) return res.status(401).json({ ok: false, error: "Unauthorized" });
+    if (!allowed.includes(role)) {
+      return res.status(403).json({ ok: false, error: "Forbidden" });
+    }
+    return next();
   };
-};
+}

@@ -1,24 +1,38 @@
-import jwt, { Secret } from "jsonwebtoken";
-import type { StringValue } from "ms";
+// src/auth/jwt.ts
+import jwt from "jsonwebtoken";
 
-const ACCESS_TOKEN_SECRET = process.env.ACCESS_TOKEN_SECRET as Secret;
-const REFRESH_TOKEN_SECRET = process.env.REFRESH_TOKEN_SECRET as Secret;
+type Role = "OWNER" | "VET" | "ADMIN";
 
-const JWT_EXPIRES = (process.env.JWT_EXPIRES || "15m") as StringValue;
-const REFRESH_EXPIRES = (process.env.REFRESH_EXPIRES || "7d") as StringValue;
+export type AccessPayload = { id: string; role: Role; email: string };
+export type RefreshPayload = { id: string };
 
-export function signAccess(payload: Record<string, any>) {
+// Read secrets + expiries (keep simple string values like "15m", "7d")
+const ACCESS_TOKEN_SECRET =
+  process.env.ACCESS_TOKEN_SECRET ||
+  process.env.JWT_SECRET || // fallback for older envs
+  "dev_access_secret_change_me";
+
+const REFRESH_TOKEN_SECRET =
+  process.env.REFRESH_TOKEN_SECRET ||
+  process.env.REFRESH_SECRET || // fallback for older envs
+  "dev_refresh_secret_change_me";
+
+const JWT_EXPIRES = process.env.JWT_EXPIRES || "15m";
+const REFRESH_EXPIRES = process.env.REFRESH_EXPIRES || "7d";
+
+// ----- Named exports -----
+export function signAccessToken(payload: AccessPayload): string {
   return jwt.sign(payload, ACCESS_TOKEN_SECRET, { expiresIn: JWT_EXPIRES });
 }
 
-export function signRefresh(payload: Record<string, any>) {
+export function signRefreshToken(payload: RefreshPayload): string {
   return jwt.sign(payload, REFRESH_TOKEN_SECRET, { expiresIn: REFRESH_EXPIRES });
 }
 
-export function verifyAccess<T = any>(token: string): T {
-  return jwt.verify(token, ACCESS_TOKEN_SECRET) as T;
+export function verifyAccess(token: string): AccessPayload {
+  return jwt.verify(token, ACCESS_TOKEN_SECRET) as AccessPayload;
 }
 
-export function verifyRefresh<T = any>(token: string): T {
-  return jwt.verify(token, REFRESH_TOKEN_SECRET) as T;
+export function verifyRefresh(token: string): RefreshPayload {
+  return jwt.verify(token, REFRESH_TOKEN_SECRET) as RefreshPayload;
 }
