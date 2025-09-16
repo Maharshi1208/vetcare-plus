@@ -6,6 +6,8 @@ const auth_1 = require("../middleware/auth");
 const zod_1 = require("zod");
 const mailer_1 = require("../notify/mailer");
 const apptBooked_1 = require("../notify/templates/apptBooked");
+const apptRescheduled_1 = require("../notify/templates/apptRescheduled");
+const apptCancelled_1 = require("../notify/templates/apptCancelled");
 const router = (0, express_1.Router)();
 const msg = (e) => (e instanceof Error ? e.message : "unexpected error");
 // ---- Zod types ----
@@ -31,7 +33,7 @@ async function assertOwnershipOrAdmin(req, petId) {
     if (!pet)
         throw new Error("Pet not found or not owned by user");
 }
-// simple 30-min conflict window around dateTime
+// Simple 30-min conflict window around dateTime
 async function vetConflict(vetId, dateTime, ignoreApptId) {
     const start = new Date(dateTime);
     const end = new Date(dateTime.getTime() + 30 * 60 * 1000);
@@ -49,7 +51,7 @@ async function vetConflict(vetId, dateTime, ignoreApptId) {
 }
 /**
  * POST /appointments
- * Create appointment (OWNER/Admin) + create PENDING payment + send confirmation email
+ * Create appointment (OWNER/Admin) + create PENDING payment + send booked email
  */
 router.post("/", auth_1.requireAuth, async (req, res) => {
     const parsed = CreateApptSchema.safeParse(req.body);
@@ -62,8 +64,9 @@ router.post("/", auth_1.requireAuth, async (req, res) => {
         if (!vet)
             return res.status(404).json({ ok: false, error: "Vet not found" });
         await vetConflict(vetId, dateTime);
-        const appt = await prisma_1.prisma.$transaction(async (tx) => {
-            const created = await tx.appointment.create({
+        // Create appt + pending payment
+        const created = await prisma_1.prisma.$transaction(async (tx) => {
+            const appt = await tx.appointment.create({
                 data: {
                     petId,
                     vetId,
@@ -77,40 +80,50 @@ router.post("/", auth_1.requireAuth, async (req, res) => {
                     dateTime: true,
                     pet: { select: { id: true, name: true } },
                     vet: { select: { id: true, name: true } },
-                    owner: { select: { email: true } }, // ⬅️ needed for email
                     ownerId: true,
                     createdAt: true,
                 },
             });
-            // mock PENDING payment (flat amount)
             await tx.payment.create({
                 data: {
-                    appointmentId: created.id,
+                    appointmentId: appt.id,
                     amountCents: 3500,
                     status: "PENDING",
-                    provider: "MOCK", // keep consistent with schema/other routes
+                    provider: "mock",
                 },
             });
-            return created;
+            return appt;
         });
-        // Fire-and-forget confirmation email if we have an email and status is BOOKED
-        if (appt.status === "BOOKED" && appt.owner?.email) {
-            const manageUrl = process.env.APP_BASE_URL
-                ? `${process.env.APP_BASE_URL}/appointments`
-                : undefined;
-            const { subject, html, text } = (0, apptBooked_1.renderApptBooked)({
-                petName: appt.pet?.name ?? "your pet",
-                vetName: appt.vet?.name ?? "our vet",
-                dateTimeISO: appt.dateTime.toISOString(),
-                manageUrl,
+        // Fire-and-forget "Booked" email
+        try {
+            const apptForEmail = await prisma_1.prisma.appointment.findUnique({
+                where: { id: created.id },
+                select: {
+                    dateTime: true,
+                    pet: { select: { name: true } },
+                    vet: { select: { name: true } },
+                    owner: { select: { email: true } },
+                },
             });
-            // don't await; log error if send fails
-            // eslint-disable-next-line @typescript-eslint/no-floating-promises
-            (0, mailer_1.sendMail)({ to: appt.owner.email, subject, html, text }).catch((e) => {
-                console.error("Failed to send appointment email:", e?.message || e);
-            });
+            const to = apptForEmail?.owner?.email;
+            if (to) {
+                const manageUrl = process.env.APP_BASE_URL
+                    ? `${process.env.APP_BASE_URL}/appointments`
+                    : undefined;
+                const { subject, html, text } = (0, apptBooked_1.renderApptBooked)({
+                    petName: apptForEmail.pet?.name ?? "your pet",
+                    vetName: apptForEmail.vet?.name ?? "our vet",
+                    dateTimeISO: apptForEmail.dateTime.toISOString(),
+                    manageUrl,
+                });
+                // eslint-disable-next-line @typescript-eslint/no-floating-promises
+                (0, mailer_1.sendMail)({ to, subject, html, text }).catch((e) => console.error("Failed to send booked email:", e?.message || e));
+            }
         }
-        res.status(201).json({ ok: true, appointment: appt });
+        catch (e) {
+            console.error("Booked email step failed:", e);
+        }
+        res.status(201).json({ ok: true, appointment: created });
     }
     catch (e) {
         res.status(400).json({ ok: false, error: msg(e) });
@@ -118,7 +131,7 @@ router.post("/", auth_1.requireAuth, async (req, res) => {
 });
 /**
  * GET /appointments
- * OWNER: their appointments; ADMIN: all; VET: if you later link users->vets
+ * OWNER: their appointments; ADMIN: all; VET: (future: if users->vets linked)
  * Optional filters: ?vetId=&ownerId=&from=&to=
  */
 router.get("/", auth_1.requireAuth, async (req, res) => {
@@ -194,7 +207,15 @@ router.post("/:id/cancel", auth_1.requireAuth, async (req, res) => {
     try {
         const appt = await prisma_1.prisma.appointment.findUnique({
             where: { id: req.params.id },
-            select: { id: true, ownerId: true, status: true },
+            select: {
+                id: true,
+                ownerId: true,
+                status: true,
+                dateTime: true,
+                pet: { select: { name: true } },
+                vet: { select: { name: true } },
+                owner: { select: { email: true } },
+            },
         });
         if (!appt)
             return res.status(404).json({ ok: false, error: "Not found" });
@@ -209,6 +230,20 @@ router.post("/:id/cancel", auth_1.requireAuth, async (req, res) => {
             data: { status: "CANCELLED" },
             select: { id: true, status: true },
         });
+        // Fire-and-forget cancel email
+        if (appt.owner?.email) {
+            const manageUrl = process.env.APP_BASE_URL
+                ? `${process.env.APP_BASE_URL}/appointments`
+                : undefined;
+            const { subject, html, text } = (0, apptCancelled_1.renderApptCancelled)({
+                petName: appt.pet?.name ?? "your pet",
+                vetName: appt.vet?.name ?? "our vet",
+                dateTimeISO: appt.dateTime.toISOString(),
+                manageUrl,
+            });
+            // eslint-disable-next-line @typescript-eslint/no-floating-promises
+            (0, mailer_1.sendMail)({ to: appt.owner.email, subject, html, text }).catch((e) => console.error("Failed to send cancel email:", e?.message || e));
+        }
         res.json({ ok: true, appointment: updated });
     }
     catch (e) {
@@ -226,7 +261,16 @@ router.post("/:id/reschedule", auth_1.requireAuth, async (req, res) => {
     try {
         const current = await prisma_1.prisma.appointment.findUnique({
             where: { id: req.params.id },
-            select: { id: true, ownerId: true, vetId: true, status: true },
+            select: {
+                id: true,
+                ownerId: true,
+                vetId: true,
+                status: true,
+                dateTime: true,
+                pet: { select: { name: true } },
+                vet: { select: { name: true } },
+                owner: { select: { email: true } },
+            },
         });
         if (!current)
             return res.status(404).json({ ok: false, error: "Not found" });
@@ -242,6 +286,21 @@ router.post("/:id/reschedule", auth_1.requireAuth, async (req, res) => {
             data: { dateTime: parsed.data.newDateTime },
             select: { id: true, status: true, dateTime: true },
         });
+        // Fire-and-forget rescheduled email
+        if (current.owner?.email) {
+            const manageUrl = process.env.APP_BASE_URL
+                ? `${process.env.APP_BASE_URL}/appointments`
+                : undefined;
+            const { subject, html, text } = (0, apptRescheduled_1.renderApptRescheduled)({
+                petName: current.pet?.name ?? "your pet",
+                vetName: current.vet?.name ?? "our vet",
+                oldDateTimeISO: current.dateTime.toISOString(),
+                newDateTimeISO: updated.dateTime.toISOString(),
+                manageUrl,
+            });
+            // eslint-disable-next-line @typescript-eslint/no-floating-promises
+            (0, mailer_1.sendMail)({ to: current.owner.email, subject, html, text }).catch((e) => console.error("Failed to send reschedule email:", e?.message || e));
+        }
         res.json({ ok: true, appointment: updated });
     }
     catch (e) {
@@ -268,7 +327,10 @@ router.patch("/:id/status", auth_1.requireAuth, (0, auth_1.requireRole)("ADMIN")
         res.status(404).json({ ok: false, error: "Not found" });
     }
 });
-// Manual email trigger for an appointment (ADMIN only)
+/**
+ * POST /appointments/:id/notify
+ * Manual email trigger for an appointment (ADMIN only)
+ */
 router.post("/:id/notify", auth_1.requireAuth, (0, auth_1.requireRole)("ADMIN"), async (req, res) => {
     try {
         const appt = await prisma_1.prisma.appointment.findUnique({
