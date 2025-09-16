@@ -1,55 +1,16 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
 
-/* ---- App base (keep it minimal) ---- */
-html, body, #root {
-  height: 100%;
+/* Optional polish */
+@layer base {
+  html, body, #root { height: 100%; }
+  body { @apply bg-slate-50 text-slate-900 antialiased; }
+  h1 { @apply text-2xl font-semibold; }
+  h2 { @apply text-xl font-semibold; }
+  h3 { @apply text-lg font-semibold; }
 }
-
-/* Respect user OS theme. Tailwind `dark:` variants will follow this if darkMode='media' */
-:root {
-  color-scheme: light dark;
-}
-
-/* Remove Vite demo styles. Do NOT center the body or force dark bg here. */
-body {
-  margin: 0;
-  min-width: 320px;
-  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-
-  /* Light default background; our pages (AuthLayout) draw their own gradient */
-  background: #f8fafc;        /* tailwind: slate-50 */
-  color: #0f172a;             /* tailwind: slate-900 */
-}
-
-/* Dark mode fallback colors (when OS is dark and darkMode='media') */
-@media (prefers-color-scheme: dark) {
-  body {
-    background: #0b1220;      /* near slate-900 */
-    color: #e2e8f0;           /* slate-200 */
-  }
-}
-
-/* Links: inherit color and only underline on hover */
-a {
-  color: inherit;
-  text-decoration: none;
-}
-a:hover {
-  text-decoration: underline;
-}
-
-/* Keep buttons neutral; components handle look/feel */
-button {
-  font: inherit;
-}
-
-/* Media should never overflow containers */
-img, svg, video, canvas {
-  display: block;
-  max-width: 100%;
-  height: auto;
+@layer components {
+  .vc-card { @apply rounded-2xl border border-slate-200 bg-white shadow-sm; }
+  .vc-muted { @apply text-sm text-slate-500; }
+  .vc-chip { @apply inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs; }
+  .vc-link { @apply text-sky-700 hover:text-sky-800 hover:underline; }
 }
