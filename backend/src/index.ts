@@ -1,7 +1,6 @@
 import dotenv from 'dotenv';
 dotenv.config();
 
-import './config/env';
 import express from 'express';
 import cors from 'cors';
 import { Pool } from 'pg';

@@ -125,8 +125,9 @@ model Appointment {
 
   payment Payment?
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  notificationLogs NotificationLog[] // back-relation for notifications
 
   @@index([petId])
   @@index([vetId])
@@ -175,15 +176,15 @@ model Medication {
 }
 
 model Payment {
-  id            String        @id @default(cuid())
-  appointmentId String        @unique
-  appointment   Appointment   @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  id            String      @id @default(cuid())
+  appointmentId String      @unique
+  appointment   Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
 
   // Use smallest currency unit to avoid floating point issues
-  amountCents   Int
-  provider      String        // "mock", "stripe", etc.
-  reference     String?       // external reference if any
-  status        PaymentStatus @default(PENDING)
+  amountCents Int
+  provider    String // "mock", "stripe", etc.
+  reference   String? // external reference if any
+  status      PaymentStatus @default(PENDING)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -192,9 +193,9 @@ model Payment {
 }
 
 model AuditLog {
-  id           String  @id @default(cuid())
-  actorId      String
-  actor        User    @relation("ActorLogs", fields: [actorId], references: [id], onDelete: Cascade)
+  id      String @id @default(cuid())
+  actorId String
+  actor   User   @relation("ActorLogs", fields: [actorId], references: [id], onDelete: Cascade)
 
   targetUserId String?
   targetUser   User?   @relation("TargetLogs", fields: [targetUserId], references: [id], onDelete: SetNull)
@@ -206,4 +207,21 @@ model AuditLog {
   @@index([actorId])
   @@index([targetUserId])
   @@index([createdAt])
+}
+
+enum NotificationKind {
+  REMINDER_24H
+  REMINDER_1H
+}
+
+model NotificationLog {
+  id            String           @id @default(cuid())
+  appointmentId String
+  kind          NotificationKind
+  sentAt        DateTime         @default(now())
+
+  appointment Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+
+  @@unique([appointmentId, kind])
+  @@index([sentAt])
 }
