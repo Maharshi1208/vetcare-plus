@@ -16,6 +16,42 @@ const LoginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(6),
 });
+// --- Register ---
+const RegisterSchema = z.object({
+  name: z.string().min(2),
+  email: z.string().email(),
+  password: z.string().min(6),
+});
+
+/** POST /auth/register */
+router.post("/register", async (req: Request, res: Response) => {
+  const parsed = RegisterSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ ok: false, error: parsed.error.issues });
+  }
+
+  const { name, email, password } = parsed.data;
+
+  // Already exists?
+  const existing = await prisma.user.findUnique({ where: { email } });
+  if (existing) {
+    return res.status(409).json({ ok: false, error: "Email already registered" });
+  }
+
+  // Create user
+  const passwordHash = await bcrypt.hash(password, 10);
+  const user = await prisma.user.create({
+    data: { name, email, passwordHash, role: "OWNER" },
+    select: { id: true, email: true, role: true, name: true },
+  });
+
+  // Tokens
+  const access = signAccessToken({ id: user.id, role: user.role, email: user.email });
+  const refresh = signRefreshToken({ id: user.id });
+
+  return res.status(201).json({ ok: true, user, tokens: { access, refresh } });
+});
+
 
 /** POST /auth/login */
 router.post("/login", async (req: Request, res: Response) => {
